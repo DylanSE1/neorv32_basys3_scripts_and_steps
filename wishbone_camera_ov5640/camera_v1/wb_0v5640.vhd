@@ -4,37 +4,37 @@ Use ieee.numeric_std.All;
 
 Library work;
 
-use work.ov5640_image_buffer.All;
+Use work.ov5640_image_buffer.All;
 
 Entity wb_ov5640 Is
 	Generic (
-		BASE_ADDRESS              			: Std_ulogic_vector(31 Downto 0) := x"90010000"; --peripheral base (informational)
-		CAMERA_CONTROL_ADDRESS            	: Std_ulogic_vector(31 Downto 0) := x"90010000"; --Camera control register. [0] = enable, [1] = reset
-		CAMERA_STATUS_ADDRESS           	: Std_ulogic_vector(31 Downto 0) := x"90010004"; --Camera status register. [0]=busy, [1]=done (sticky)
-		IMAGE_FORMAT_ADDRESS           	: Std_ulogic_vector(31 Downto 0) := x"90010008"; --Image format. [0] = 1 for YUV422. (Lowest3 bits can be used to select the format)
-		IMAGE_RESOLUTION_ADDRESS           : Std_ulogic_vector(31 Downto 0) := x"9001000C"; --[15:0] = image width. [31:16] = image height
-		MASTER_WORDS_TO_READ_ADDRESS				: Std_ulogic_vector(31 Downto 0) := x"90010010"; --32-bit words the master has to read to gather the complete image
-		IMAGE_BUFFER_BASE			   			: Std_ulogic_vector(31 Downto 0) := x"90011000" --Image buffer base address
+		BASE_ADDRESS                 : Std_ulogic_vector(31 Downto 0) := x"90010000"; --peripheral base (informational)
+		CAMERA_CONTROL_ADDRESS       : Std_ulogic_vector(31 Downto 0) := x"90010000"; --Camera control register. [0] = enable, [1] = reset
+		CAMERA_STATUS_ADDRESS        : Std_ulogic_vector(31 Downto 0) := x"90010004"; --Camera status register. [0]=busy, [1]=done (sticky)
+		IMAGE_FORMAT_ADDRESS         : Std_ulogic_vector(31 Downto 0) := x"90010008"; --Image format. [0] = 1 for YUV422. (Lowest3 bits can be used to select the format)
+		IMAGE_RESOLUTION_ADDRESS     : Std_ulogic_vector(31 Downto 0) := x"9001000C"; --[15:0] = image width. [31:16] = image height
+		MASTER_WORDS_TO_READ_ADDRESS : Std_ulogic_vector(31 Downto 0) := x"90010010"; --32-bit words the master has to read to gather the complete image
+		IMAGE_BUFFER_BASE            : Std_ulogic_vector(31 Downto 0) := x"90011000" --Image buffer base address
 	);
 	Port (
-		clk        : In  Std_ulogic; --system clock
-		reset      : In  Std_ulogic; --synchronous reset
-		i_wb_cyc   : In  Std_ulogic; --Wishbone: cycle valid
-		i_wb_stb   : In  Std_ulogic; --Wishbone: strobe
-		i_wb_we    : In  Std_ulogic; --Wishbone: 1=write, 0=read
-		i_wb_addr  : In  Std_ulogic_vector(31 Downto 0);--Wishbone: address
-		i_wb_data  : In  Std_ulogic_vector(31 Downto 0);--Wishbone: write data
-		o_wb_ack   : Out Std_ulogic; --Wishbone: acknowledge
-		o_wb_stall : Out Std_ulogic; --Wishbone: stall (always '0')
-		o_wb_data  : Out Std_ulogic_vector(31 Downto 0); --Wishbone: read data
+		clk        : In    Std_ulogic; --system clock
+		reset      : In    Std_ulogic; --synchronous reset
+		i_wb_cyc   : In    Std_ulogic; --Wishbone: cycle valid
+		i_wb_stb   : In    Std_ulogic; --Wishbone: strobe
+		i_wb_we    : In    Std_ulogic; --Wishbone: 1=write, 0=read
+		i_wb_addr  : In    Std_ulogic_vector(31 Downto 0);--Wishbone: address
+		i_wb_data  : In    Std_ulogic_vector(31 Downto 0);--Wishbone: write data
+		o_wb_ack   : Out   Std_ulogic; --Wishbone: acknowledge
+		o_wb_stall : Out   Std_ulogic; --Wishbone: stall (always '0')
+		o_wb_data  : Out   Std_ulogic_vector(31 Downto 0); --Wishbone: read data
 		--Interface for the camera harware
-		SIO_C		: InOut std_ulogic;	--SIO_C - SCCB clock signal. FPGA -> Camera
-		SIO_D		: InOut std_ulogic;	--SIO_D - SCCB data signal (bi-direcctional). FPGA <--> Camera
-		VSYNC	 	: In Std_ulogic;	--Camera VSYNC signal
-		HREF		: In Std_ulogic;	--Camera HREF signal
-		PCLK		: In Std_ulogic;	--Camera PCLK signal
-		Data		: In Std_ulogic_vector (7 downto 0) --Camera data out pins
-		
+		SIO_C      : Inout Std_ulogic; --SIO_C - SCCB clock signal. FPGA -> Camera
+		SIO_D      : Inout Std_ulogic; --SIO_D - SCCB data signal (bi-direcctional). FPGA <--> Camera
+		VSYNC      : In    Std_ulogic; --Camera VSYNC signal
+		HREF       : In    Std_ulogic; --Camera HREF signal
+		PCLK       : In    Std_ulogic; --Camera PCLK signal
+		Data       : In    Std_ulogic_vector (7 Downto 0) --Camera data out pins
+
 	);
 End Entity;
 
@@ -42,33 +42,58 @@ End Entity;
 --There is an exception. SCCB transmission uses 9-bits. 9th bit is a waste
 --The SCCB document talks about using a tr
 Architecture rtl Of wb_ov5640 Is
+	--SCCB controller component
+	Component sccb_i2c_wrapper Is
+		Generic (
+			INPUT_CLK_HZ : Integer := 72_000_000;
+			BUS_CLK_HZ   : Integer := 400_000
+		);
+		Port (
+			clk   : In    Std_ulogic;
+			reset : In    Std_ulogic;
+			--SCCB pins
+			SIO_C : Inout Std_ulogic;
+			SIO_D : Inout Std_ulogic;
+			--control
+			start : In    Std_ulogic; --1 to start
+			busy  : Out   Std_ulogic; --0 = idle. 1 = busy
+			done  : Out   Std_ulogic; --0 = not done. 1 = busy
+			err   : Out   Std_ulogic --Included because the I2C controller has it	
+		);
+	End Component;
+
 	--Main registers
-	signal camera_control_reg 	: Std_ulogic_vector(31 Downto 0) := (Others => '0');
-	signal camera_status_reg	: Std_ulogic_vector(31 Downto 0) := (Others => '0');
-	signal image_format_reg	: Std_ulogic_vector(31 Downto 0) := (Others => '0');
-	signal image_resolution_reg: Std_ulogic_vector(31 Downto 0) := (Others => '0');
-	signal master_words_to_read_reg: Std_ulogic_vector(31 Downto 0) := (Others => '0');
-	
+	Signal camera_control_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
+	Signal camera_status_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
+	Signal image_format_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
+	Signal image_resolution_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
+	Signal master_words_to_read_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
+
 	--Image buffer
 	Signal image_buffer : tensor_mem_type := (Others => (Others => '0'));
-	Signal image_buffer_wb_rdata	: std_ulogic_vector(31 Downto 0) := (Others => '0');
+	Signal image_buffer_wb_rdata : Std_ulogic_vector(31 Downto 0) := (Others => '0');
 	--BRAM inference hints
 	Attribute ram_style : String;
 	Attribute syn_ramstyle : String;
 	Attribute ram_style Of image_buffer : Signal Is "block";
 	Attribute syn_ramstyle Of image_buffer : Signal Is "block_ram";
-	
+
 	--Camera interface registers
-	--SCCB
-	Signal SCCB_device_addr : Std_ulogic_vector(15 Downto 0) := (Others => '0');
-	Signal SCCB_reg_addr : Std_ulogic_vector(15 Downto 0) := (Others => '0');
-	Signal SCCB_device_data : Std_ulogic_vector(7 Downto 0) := (Others => '0');
+	--SCCB controller
+	--Signal SCCB_device_addr : Std_ulogic_vector(15 Downto 0) := (Others => '0');
+	--Signal SCCB_reg_addr : Std_ulogic_vector(15 Downto 0) := (Others => '0');
+	--Signal SCCB_device_data : Std_ulogic_vector(7 Downto 0) := (Others => '0');
+	Signal start_lat : Std_ulogic := '0';
+	Signal busy_lat : Std_ulogic;
+	Signal done_lat : Std_ulogic;
+	Signal err_lat : Std_ulogic;
+	Signal sccb_boot_program_started : Std_ulogic := '0';
 	--Other latches
-	signal vsync_lat : std_ulogic;
-	signal href_lat : std_ulogic;
-	signal pclk_lat: std_ulogic;
-	signal data_lat: std_ulogic_vector (7 downto 0) := (others => '0');
-	
+	Signal vsync_lat : Std_ulogic;
+	Signal href_lat : Std_ulogic;
+	Signal pclk_lat : Std_ulogic;
+	Signal data_lat : Std_ulogic_vector (7 Downto 0) := (Others => '0');
+
 	--Wishbone
 	Signal ack_r : Std_ulogic := '0';
 	Signal wb_req : Std_ulogic := '0'; --Variable tp combine checks (Clock is high and the slave (NPU) is selected)
@@ -94,7 +119,7 @@ Architecture rtl Of wb_ov5640 Is
 		--return to_integer(offset(11 downto 2));        --just the word offset
 		Return to_integer(shift_right(offset, 2)); --Right shift 2 removes they byte offset within a word. We are left with just the word index
 	End Function;
-	
+
 Begin
 
 	--Simple, non-stalling slave peripheral
@@ -102,6 +127,39 @@ Begin
 	o_wb_ack <= ack_r;
 	--Select the camera
 	wb_req <= i_wb_cyc And i_wb_stb; --Clock is high and the slave (NPU) is selected
+
+	--SCCB component instantiation
+	sccb_controller_inst : sccb_i2c_wrapper
+	Port Map(
+		clk   => clk,
+		reset => reset,
+		SIO_C => SIO_C,
+		SIO_D => SIO_D,
+		start => start_lat,
+		busy  => busy_lat,
+		done  => done_lat,
+		err   => err_lat
+	);
+
+	Process (clk)
+	Begin
+		If rising_edge(clk) Then
+			If (reset = '1') Then
+				sccb_boot_program_started <= '0';
+				start_lat <= '0';
+			Else
+				If (sccb_boot_program_started = '0') Then
+					start_lat <= '1'; --request sccb wrapper to program the camera
+					If (busy_lat = '1') Then --If wrapper is busy, then it has started
+						start_lat <= '0'; --Deassert start latch input for wrapper
+						sccb_boot_program_started <= '1'; --never request wrapper again
+					End If;
+				Else
+					start_lat <= '0';
+				End If;
+			End If;
+		End If;
+	End Process;
 
 	--The acknowledgement process is combined with the tensor multiplex select logic and register reads
 	Process (clk)
@@ -139,34 +197,30 @@ Begin
 					Elsif (i_wb_addr = MASTER_WORDS_TO_READ_ADDRESS) Then
 						is_valid := '1';
 						reg_rdata <= master_words_to_read_reg;
-					--Tensor windows are valid only when idle (npu_busy='0')
+						--Tensor windows are valid only when idle (npu_busy='0')
 					Elsif (unsigned(i_wb_addr) >= unsigned(IMAGE_BUFFER_BASE) And
 						unsigned(i_wb_addr) < unsigned(IMAGE_BUFFER_BASE) + to_unsigned(TENSOR_BYTES, 32)) Then
 						is_valid := '1';
 						is_tensor := '1';
 						wb_rsel <= "001";
 
-					--Gate image buffer while camera is busy
-					If (is_valid = '1') Then
-						If (is_tensor = '1' And camera_busy = '1') Then
-							ack_r <= '0';
-						Else
-							ack_r <= '1';
+						--Gate image buffer while camera is busy
+						If (is_valid = '1') Then
+							If (is_tensor = '1' And camera_busy = '1') Then
+								ack_r <= '0';
+							Else
+								ack_r <= '1';
+							End If;
 						End If;
 					End If;
 				End If;
 			End If;
 		End If;
-		End if;
 	End Process;
 
 	With wb_rsel Select
 		o_wb_data <= reg_rdata When "000",
 		image_buffer_wb_rdata When Others;
-
-
-
-
 	--Image buffer: WB read (when idle) + camera write
 	--TODO: Camera write
 	Process (clk)
@@ -191,47 +245,47 @@ Begin
 						End If;
 					End If;
 
-				-- Else
-				-- 	--NPU write
-				-- 	If (state = S_P_WRITE) Then
-				-- 		--Write a single signed int8 into the packed word at element index out_i_reg
-				-- 		w_index := to_integer(out_i_reg(15 Downto 2));
-				-- 		byte_sel := to_integer(out_i_reg(1 Downto 0));
-				-- 		If (w_index < TENSOR_WORDS) Then
-				-- 			word_tmp := tensor_R_mem(w_index);
-				-- 			Case byte_sel Is
-				-- 				When 0 => word_tmp(7 Downto 0) := Std_ulogic_vector(r8_reg);
-				-- 				When 1 => word_tmp(15 Downto 8) := Std_ulogic_vector(r8_reg);
-				-- 				When 2 => word_tmp(23 Downto 16) := Std_ulogic_vector(r8_reg);
-				-- 				When Others => word_tmp(31 Downto 24) := Std_ulogic_vector(r8_reg);
-				-- 			End Case;
-				-- 			tensor_R_mem(w_index) <= word_tmp;
-				-- 		End If;
+					-- Else
+					-- 	--NPU write
+					-- 	If (state = S_P_WRITE) Then
+					-- 		--Write a single signed int8 into the packed word at element index out_i_reg
+					-- 		w_index := to_integer(out_i_reg(15 Downto 2));
+					-- 		byte_sel := to_integer(out_i_reg(1 Downto 0));
+					-- 		If (w_index < TENSOR_WORDS) Then
+					-- 			word_tmp := tensor_R_mem(w_index);
+					-- 			Case byte_sel Is
+					-- 				When 0 => word_tmp(7 Downto 0) := Std_ulogic_vector(r8_reg);
+					-- 				When 1 => word_tmp(15 Downto 8) := Std_ulogic_vector(r8_reg);
+					-- 				When 2 => word_tmp(23 Downto 16) := Std_ulogic_vector(r8_reg);
+					-- 				When Others => word_tmp(31 Downto 24) := Std_ulogic_vector(r8_reg);
+					-- 			End Case;
+					-- 			tensor_R_mem(w_index) <= word_tmp;
+					-- 		End If;
 
-				-- 	Elsif (state = S_DENSE_WRITE) Then
-				-- 		--Write dense_result (signed int8) at element index out_i_reg
-				-- 		w_index := to_integer(out_i_reg(15 Downto 2));
-				-- 		byte_sel := to_integer(out_i_reg(1 Downto 0));
-				-- 		If (w_index < TENSOR_WORDS) Then
-				-- 			word_tmp := tensor_R_mem(w_index);
-				-- 			Case byte_sel Is
-				-- 				When 0 => word_tmp(7 Downto 0) := Std_ulogic_vector(dense_result);
-				-- 				When 1 => word_tmp(15 Downto 8) := Std_ulogic_vector(dense_result);
-				-- 				When 2 => word_tmp(23 Downto 16) := Std_ulogic_vector(dense_result);
-				-- 				When Others => word_tmp(31 Downto 24) := Std_ulogic_vector(dense_result);
-				-- 			End Case;
-				-- 			tensor_R_mem(w_index) <= word_tmp;
-				-- 		End If;
+					-- 	Elsif (state = S_DENSE_WRITE) Then
+					-- 		--Write dense_result (signed int8) at element index out_i_reg
+					-- 		w_index := to_integer(out_i_reg(15 Downto 2));
+					-- 		byte_sel := to_integer(out_i_reg(1 Downto 0));
+					-- 		If (w_index < TENSOR_WORDS) Then
+					-- 			word_tmp := tensor_R_mem(w_index);
+					-- 			Case byte_sel Is
+					-- 				When 0 => word_tmp(7 Downto 0) := Std_ulogic_vector(dense_result);
+					-- 				When 1 => word_tmp(15 Downto 8) := Std_ulogic_vector(dense_result);
+					-- 				When 2 => word_tmp(23 Downto 16) := Std_ulogic_vector(dense_result);
+					-- 				When Others => word_tmp(31 Downto 24) := Std_ulogic_vector(dense_result);
+					-- 			End Case;
+					-- 			tensor_R_mem(w_index) <= word_tmp;
+					-- 		End If;
 
-				-- 	Elsif (state = S_ACT_WRITE) Then
-				-- 		--Softmax EXP is in-place on A, so only write to R for all other activation cases
-				-- 		If (Not (op_code_reg = OP_SOFTMAX And softmax_mode_latched = '0')) Then
-				-- 			If (to_integer(word_i_reg) < TENSOR_WORDS) Then
-				-- 				tensor_R_mem(to_integer(word_i_reg)) <= r_w_reg;
-				-- 			End If;
-				-- 		End If;
-				-- 	End If;
-				 End If;
+					-- 	Elsif (state = S_ACT_WRITE) Then
+					-- 		--Softmax EXP is in-place on A, so only write to R for all other activation cases
+					-- 		If (Not (op_code_reg = OP_SOFTMAX And softmax_mode_latched = '0')) Then
+					-- 			If (to_integer(word_i_reg) < TENSOR_WORDS) Then
+					-- 				tensor_R_mem(to_integer(word_i_reg)) <= r_w_reg;
+					-- 			End If;
+					-- 		End If;
+					-- 	End If;
+				End If;
 			End If;
 		End If;
 	End Process;
