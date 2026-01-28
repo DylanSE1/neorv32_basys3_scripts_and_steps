@@ -8,13 +8,14 @@ Use work.ov5640_image_buffer.All;
 
 Entity wb_ov5640 Is
 	Generic (
-		BASE_ADDRESS                 : Std_ulogic_vector(31 Downto 0) := x"90010000"; --peripheral base (informational)
-		CAMERA_CONTROL_ADDRESS       : Std_ulogic_vector(31 Downto 0) := x"90010000"; --Camera control register. [0] = enable, [1] = reset
-		CAMERA_STATUS_ADDRESS        : Std_ulogic_vector(31 Downto 0) := x"90010004"; --Camera status register. [0]=busy, [1]=done (sticky)
-		IMAGE_FORMAT_ADDRESS         : Std_ulogic_vector(31 Downto 0) := x"90010008"; --Image format. [0] = 1 for YUV422. (Lowest3 bits can be used to select the format)
-		IMAGE_RESOLUTION_ADDRESS     : Std_ulogic_vector(31 Downto 0) := x"9001000C"; --[15:0] = image width. [31:16] = image height
-		MASTER_WORDS_TO_READ_ADDRESS : Std_ulogic_vector(31 Downto 0) := x"90010010"; --32-bit words the master has to read to gather the complete image
-		IMAGE_BUFFER_BASE            : Std_ulogic_vector(31 Downto 0) := x"90011000" --Image buffer base address
+		BASE_ADDRESS                    : Std_ulogic_vector(31 Downto 0) := x"90010000"; --peripheral base (informational)
+		CAMERA_CONTROL_ADDRESS          : Std_ulogic_vector(31 Downto 0) := x"90010000"; --Camera control register. [0] = enable, [1] = reset
+		CAMERA_STATUS_ADDRESS           : Std_ulogic_vector(31 Downto 0) := x"90010004"; --Camera status register. [0]=busy, [1]=done (sticky)
+		IMAGE_FORMAT_ADDRESS            : Std_ulogic_vector(31 Downto 0) := x"90010008"; --Image format. [0] = 1 for YUV422. (Lowest3 bits can be used to select the format)
+		IMAGE_RESOLUTION_ADDRESS        : Std_ulogic_vector(31 Downto 0) := x"9001000C"; --[15:0] = image width. [31:16] = image height
+		MASTER_WORDS_TO_READ_ADDRESS    : Std_ulogic_vector(31 Downto 0) := x"90010010"; --32-bit words the master has to read to gather the complete image
+		SCCB_PROGRAM_STATUS_REG_ADDRESS : Std_ulogic_vector(31 Downto 0) := x"90010014"; --Register to show SCCB programmer status. [0] = start latched. [1] = program started. [2] = wrapper busy. [3] = done. [4] = error 
+		IMAGE_BUFFER_BASE               : Std_ulogic_vector(31 Downto 0) := x"90011000" --Image buffer base address
 	);
 	Port (
 		clk        : In    Std_ulogic; --system clock
@@ -68,6 +69,7 @@ Architecture rtl Of wb_ov5640 Is
 	Signal image_format_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
 	Signal image_resolution_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
 	Signal master_words_to_read_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
+	Signal sccb_program_status_reg : Std_ulogic_vector(31 Downto 0) := (Others => '0');
 
 	--Image buffer
 	Signal image_buffer : tensor_mem_type := (Others => (Others => '0'));
@@ -153,6 +155,7 @@ Begin
 					If (busy_lat = '1') Then --If wrapper is busy, then it has started
 						start_lat <= '0'; --Deassert start latch input for wrapper
 						sccb_boot_program_started <= '1'; --never request wrapper again
+
 					End If;
 				Else
 					start_lat <= '0';
@@ -161,6 +164,31 @@ Begin
 		End If;
 	End Process;
 
+	--Process to set bits of SCCB program status register. [0] = start latched. [1] = program started. [2] = wrapper busy. [3] = done. [4] = error
+	Process (clk)
+	Begin
+		If rising_edge(clk) Then
+			If (reset = '1') Then
+				sccb_program_status_reg <= (Others => '0');
+			Else
+				If (start_lat = '1') Then
+					sccb_program_status_reg (0) <= '1';
+				End If;
+				If (sccb_boot_program_started <= '1') Then
+					sccb_program_status_reg (1) <= '1';
+				End If;
+				If (busy_lat = '1') Then
+					sccb_program_status_reg (2) <= '1';
+				End If;
+				If (done_lat = '1') Then
+					sccb_program_status_reg (3) <= '1';
+				End If;
+				If (err_lat = '1') Then
+					sccb_program_status_reg (4) <= '1';
+				End If;
+			End If;
+		End If;
+	End Process;
 	--The acknowledgement process is combined with the tensor multiplex select logic and register reads
 	Process (clk)
 		Variable is_valid : Std_ulogic;
@@ -197,20 +225,22 @@ Begin
 					Elsif (i_wb_addr = MASTER_WORDS_TO_READ_ADDRESS) Then
 						is_valid := '1';
 						reg_rdata <= master_words_to_read_reg;
+					Elsif (i_wb_addr = SCCB_PROGRAM_STATUS_REG_ADDRESS) Then
+						is_valid := '1';
+						reg_rdata <= sccb_program_status_reg;
 						--Tensor windows are valid only when idle (npu_busy='0')
 					Elsif (unsigned(i_wb_addr) >= unsigned(IMAGE_BUFFER_BASE) And
 						unsigned(i_wb_addr) < unsigned(IMAGE_BUFFER_BASE) + to_unsigned(TENSOR_BYTES, 32)) Then
 						is_valid := '1';
 						is_tensor := '1';
 						wb_rsel <= "001";
-
-						--Gate image buffer while camera is busy
-						If (is_valid = '1') Then
-							If (is_tensor = '1' And camera_busy = '1') Then
-								ack_r <= '0';
-							Else
-								ack_r <= '1';
-							End If;
+					End If;
+					--Gate image buffer while camera is busy
+					If (is_valid = '1') Then
+						If (is_tensor = '1' And camera_busy = '1') Then
+							ack_r <= '0';
+						Else
+							ack_r <= '1';
 						End If;
 					End If;
 				End If;
