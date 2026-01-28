@@ -40,8 +40,6 @@ Entity wb_ov5640 Is
 End Entity;
 
 --2-wire SCCB is similar to I2C apparently. SIO_C = SCL and SIO_D = SDA
---There is an exception. SCCB transmission uses 9-bits. 9th bit is a waste
---The SCCB document talks about using a tr
 Architecture rtl Of wb_ov5640 Is
 	--SCCB controller component
 	Component sccb_i2c_wrapper Is
@@ -321,3 +319,4 @@ Begin
 	End Process;
 
 End Architecture;
+
