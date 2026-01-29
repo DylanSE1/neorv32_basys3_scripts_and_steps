@@ -9,9 +9,9 @@ Use work.ov5640_image_buffer.All;
 Entity wb_ov5640 Is
 	Generic (
 		BASE_ADDRESS                    : Std_ulogic_vector(31 Downto 0) := x"90010000"; --peripheral base (informational)
-		CAMERA_CONTROL_ADDRESS          : Std_ulogic_vector(31 Downto 0) := x"90010000"; --Camera control register. [0] = enable, [1] = reset
-		CAMERA_STATUS_ADDRESS           : Std_ulogic_vector(31 Downto 0) := x"90010004"; --Camera status register. [0]=busy, [1]=done (sticky)
-		IMAGE_FORMAT_ADDRESS            : Std_ulogic_vector(31 Downto 0) := x"90010008"; --Image format. [0] = 1 for YUV422. (Lowest3 bits can be used to select the format)
+		CAMERA_CONTROL_ADDRESS          : Std_ulogic_vector(31 Downto 0) := x"90010000"; --Camera control register. [0] = 1 from master, capture image. Peripheral sets it to 0 after capturing an image
+		CAMERA_STATUS_ADDRESS           : Std_ulogic_vector(31 Downto 0) := x"90010004"; --Camera status register. [0] = 1 = busy, [1] = 1 = done
+		IMAGE_FORMAT_ADDRESS            : Std_ulogic_vector(31 Downto 0) := x"90010008"; --Image format. [0] = 1 for YUV422. (Lowest3 bits can be used to select the format) (not used)
 		IMAGE_RESOLUTION_ADDRESS        : Std_ulogic_vector(31 Downto 0) := x"9001000C"; --[15:0] = image width. [31:16] = image height
 		MASTER_WORDS_TO_READ_ADDRESS    : Std_ulogic_vector(31 Downto 0) := x"90010010"; --32-bit words the master has to read to gather the complete image
 		SCCB_PROGRAM_STATUS_REG_ADDRESS : Std_ulogic_vector(31 Downto 0) := x"90010014"; --Register to show SCCB programmer status. [0] = start latched. [1] = program started. [2] = wrapper busy. [3] = done. [4] = error 
@@ -319,4 +319,5 @@ Begin
 	End Process;
 
 End Architecture;
+
 
