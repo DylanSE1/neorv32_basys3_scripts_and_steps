@@ -94,6 +94,36 @@ Architecture rtl Of wb_ov5640 Is
 	Signal pclk_lat : Std_ulogic;
 	Signal data_lat : Std_ulogic_vector (7 Downto 0) := (Others => '0');
 
+	-- Capture (PCLK domain)
+	type cap_state_t is (CAP_IDLE, CAP_ARM, CAP_WAIT_ACTIVE, CAP_CAPTURE, CAP_DONE);
+	signal cap_state      : cap_state_t := CAP_IDLE;
+
+	signal cap_busy_pclk  : std_ulogic := '0';
+	signal cap_done_pclk  : std_ulogic := '0';
+
+	-- sync capture request into PCLK domain
+	signal cap_req_ff1    : std_ulogic := '0';
+	signal cap_req_ff2    : std_ulogic := '0';
+
+	-- sync busy/done back into clk domain
+	signal cap_busy_c1    : std_ulogic := '0';
+	signal cap_busy_c2    : std_ulogic := '0';
+	signal cap_done_c1    : std_ulogic := '0';
+	signal cap_done_c2    : std_ulogic := '0';
+	signal vsync_prev     : std_ulogic := '0';
+
+	-- YUV422 byte phase and grayscale packing
+	signal yuv_phase      : unsigned(1 downto 0) := (others => '0'); -- 0=Y0 1=U 2=Y1 3=V
+	signal y_word_buf     : std_ulogic_vector(31 downto 0) := (others => '0');
+	signal y_byte_idx     : unsigned(1 downto 0) := (others => '0'); -- 0..3
+	signal y_word_index   : unsigned(31 downto 0) := (others => '0');
+	signal y_pixel_count  : unsigned(31 downto 0) := (others => '0');
+
+	-- total pixels to capture
+	signal total_pixels_clk : unsigned(31 downto 0) := to_unsigned(MAX_DIM*MAX_DIM, 32);
+	signal total_pix_p1     : unsigned(31 downto 0) := (others => '0');
+	signal total_pix_p2     : unsigned(31 downto 0) := (others => '0');
+
 	--Wishbone
 	Signal ack_r : Std_ulogic := '0';
 	Signal wb_req : Std_ulogic := '0'; --Variable tp combine checks (Clock is high and the slave (NPU) is selected)
@@ -127,7 +157,7 @@ Begin
 	o_wb_ack <= ack_r;
 	--Select the camera
 	wb_req <= i_wb_cyc And i_wb_stb; --Clock is high and the slave (NPU) is selected
-
+	camera_busy <= cap_busy_c2; -- camera busy
 	--SCCB component instantiation
 	sccb_controller_inst : sccb_i2c_wrapper
 	Port Map(
@@ -187,6 +217,180 @@ Begin
 			End If;
 		End If;
 	End Process;
+
+	-- Sync start request + total_pixels into PCLK domain
+	Process(PCLK)
+	Begin
+  		If rising_edge(PCLK) Then
+    		If reset = '1' Then
+      			cap_req_ff1 <= '0';
+      			cap_req_ff2 <= '0';
+      			total_pix_p1 <= (Others => '0');
+      			total_pix_p2 <= (Others => '0');
+    		Else
+      			cap_req_ff1 <= camera_control_reg(0);
+      			cap_req_ff2 <= cap_req_ff1;
+
+      			total_pix_p1 <= total_pixels_clk;
+      			total_pix_p2 <= total_pix_p1;
+    		End if;
+  		End if;
+	End process;
+
+	-- Sync busy/done back to clk domain
+	Process(clk)
+	Begin
+  		If rising_edge(clk) Then
+    		If reset = '1' Then
+      			cap_busy_c1 <= '0'; cap_busy_c2 <= '0';
+      			cap_done_c1 <= '0'; cap_done_c2 <= '0';
+    		Else
+      			cap_busy_c1 <= cap_busy_pclk; cap_busy_c2 <= cap_busy_c1;
+      			cap_done_c1 <= cap_done_pclk; cap_done_c2 <= cap_done_c1;
+    		End if;
+  		End if;
+	End process;
+
+	-- Update camera status + auto-clear control bit
+	Process(clk)
+	Begin
+  		If rising_edge(clk) Then
+    		If reset = '1' Then
+      			camera_status_reg <= (Others => '0');
+    		Else
+      			camera_status_reg(0) <= camera_busy; -- busy
+      			If cap_done_c2 = '1' Then
+        			camera_status_reg(1) <= '1';     -- done sticky
+        			camera_control_reg(0) <= '0';    -- self-clear capture bit
+      			End if;
+    		End if;
+  		End if;
+	End process;
+
+	-- PCLK capture process (writes image_buffer)
+	Process(PCLK)
+  		Variable buf_v : std_ulogic_vector(31 Downto 0);
+  		Variable count_next : unsigned(31 Downto 0);
+	Begin
+  		If rising_edge(PCLK) Then
+    		If reset = '1' Then
+      			cap_state <= CAP_IDLE;
+      			cap_busy_pclk <= '0';
+      			cap_done_pclk <= '0';
+      			vsync_prev <= '0';
+      			yuv_phase <= (Others => '0');
+      			y_word_buf <= (Others => '0');
+      			y_byte_idx <= (Others => '0');
+      			y_word_index <= (Others => '0');
+      			y_pixel_count <= (Others => '0');
+    		Else
+      			-- track VSYNC edge
+      			vsync_prev <= VSYNC;
+
+      			Case cap_state Is
+        			When CAP_IDLE =>
+          				cap_busy_pclk <= '0';
+          				cap_done_pclk <= '0';
+						If (cap_req_ff2 = '1') Then
+            				cap_state <= CAP_ARM;
+          				End If;
+
+        			When CAP_ARM =>
+          				-- start on a clean frame boundary: wait for VSYNC rising edge
+          				If (vsync_prev = '0' And VSYNC = '1') Then
+            				cap_state <= CAP_WAIT_ACTIVE;
+          				End If;
+
+        			When CAP_WAIT_ACTIVE =>
+          				-- wait until active frame begins (common: VSYNC goes low)
+          				If VSYNC = '0' Then
+            				yuv_phase <= (others => '0');
+            				y_word_buf <= (others => '0');
+            				y_byte_idx <= (others => '0');
+            				y_word_index <= (others => '0');
+            				y_pixel_count <= (others => '0');
+            				cap_busy_pclk <= '1';
+            				cap_done_pclk <= '0';
+            				cap_state <= CAP_CAPTURE;
+          				End If;
+
+        			When CAP_CAPTURE =>
+          				cap_busy_pclk <= '1';
+
+          				-- end on VSYNC high (frame end)
+          				If VSYNC = '1' Then
+            				-- flush partial word if needed
+            				If (y_byte_idx /= "00") Then
+              					If to_integer(y_word_index) < TENSOR_WORDS Then
+                					image_buffer(to_integer(y_word_index)) <= y_word_buf;
+              					End If;
+            				End If;
+            				cap_busy_pclk <= '0';
+            				cap_done_pclk <= '1';
+            				cap_state <= CAP_DONE;
+
+          				Else
+            				If HREF = '1' Then
+              					-- capture only Y bytes from YUYV (phase 0 and 2)
+              					If (yuv_phase = "00" Or yuv_phase = "10") Then
+                					buf_v := y_word_buf;
+
+                					Case y_byte_idx Is
+                  						When "00" => buf_v(7 Downto 0) := Data;
+                  						When "01" => buf_v(15 Downto 8) := Data;
+                  						When "10" => buf_v(23 Downto 16) := Data;
+                  						When Others => buf_v(31 Downto 24) := Data;
+                					End Case;
+
+                					count_next := y_pixel_count + 1;
+                					y_pixel_count <= count_next;
+
+                					-- store/advance packing
+                					If y_byte_idx = "11" Then
+                  						If to_integer(y_word_index) < TENSOR_WORDS Then
+                    						image_buffer(to_integer(y_word_index)) <= buf_v;
+                  						End If;
+                  						y_word_index <= y_word_index + 1;
+                  						y_byte_idx <= (Others => '0');
+                  						y_word_buf <= (Others => '0');
+                					Else
+                  						y_byte_idx <= y_byte_idx + 1;
+                  						y_word_buf <= buf_v;
+                					End If;
+
+                					-- stop when enough pixels captured
+                					If (count_next >= total_pix_p2) Then
+                  						-- flush partial if we didn't write above
+                  						If (y_byte_idx /= "11") Then
+                    						If to_integer(y_word_index) < TENSOR_WORDS Then
+                      							image_buffer(to_integer(y_word_index)) <= buf_v;
+                    						End If;
+                  						End If;
+
+                  						cap_busy_pclk <= '0';
+                  						cap_done_pclk <= '1';
+                  						cap_state <= CAP_DONE;
+                					End If;
+              					End If;
+
+              					-- advance phase every byte
+              					yuv_phase <= yuv_phase + 1;
+            				Else
+              					-- re-align phase
+              					yuv_phase <= (Others => '0');
+            				End If;
+          				End If;
+        			When CAP_DONE =>
+          				cap_busy_pclk <= '0';
+          			If cap_req_ff2 = '0' Then
+            			cap_done_pclk <= '0';
+            			cap_state <= CAP_IDLE;
+          			End If;
+      			End Case;
+    		End If;
+  		End If;
+	End Process;
+			
 	--The acknowledgement process is combined with the tensor multiplex select logic and register reads
 	Process (clk)
 		Variable is_valid : Std_ulogic;
@@ -319,5 +523,6 @@ Begin
 	End Process;
 
 End Architecture;
+
 
 
