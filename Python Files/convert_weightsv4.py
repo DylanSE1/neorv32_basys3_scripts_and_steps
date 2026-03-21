@@ -3,11 +3,11 @@ import tensorflow as tf
 from pathlib import Path
 
 # model_path="14x14_mnist_model.keras"
-model_path = "rps_gray100_savedmodelv3.keras"
+model_path = "breast_cancer.keras"
 output_path=Path("exported_weights_q07")
 
-ada_ads_path = output_path / "rps_gray100_savedmodelv3.ads"
-ada_package_name = "rps_gray100_savedmodelv3"
+ada_ads_path = output_path / "breast_cancer_test_weights.ads"
+ada_package_name = "breast_cancer_test_weights"
 
 #Input and output scales are always int8 Q0.7
 lhs_scale = 1.0/128.0
@@ -121,12 +121,15 @@ def write_ada_int(f, name, value: int):
 #Helper to write Ada word array.
 def write_ada_word_array(f, name, words):
     f.write(f"{name} : constant Word_Array (Natural range 0 .. {len(words)-1}) := (\n")
-    for i, w in enumerate(words):
-        if(i!=len(words)-1):
-            sep = ","
-        else:
-            sep = ""
-        f.write(f"16#{w:08X}#{sep}\n")
+    if(len(words) == 1):
+        f.write(f"  0 => 16#{words[0]:08X}#\n")
+    else:
+        for i, w in enumerate(words):
+            if(i!=len(words)-1):
+                sep = ","
+            else:
+                sep = ""
+            f.write(f"16#{w:08X}#{sep}\n")
     f.write(");\n\n")
 #Search (backward) through layers (up to but not including layer_index) to find
 #the most recent layer with a 4D output shape (batch, height, width, channels) 
