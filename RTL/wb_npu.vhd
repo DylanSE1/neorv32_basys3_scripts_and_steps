@@ -9,7 +9,7 @@ Use work.tensor_operations_activation.All;
 Use work.tensor_operations_dense.All;
 Use work.tensor_operations_conv2d.All;
 --Revised address for tensors B, C, and R to allow addressing for the new 100x100 tensors (2500 words)
-Entity wb_peripheral_top Is
+Entity wb_npu Is
 	Generic (
 		BASE_ADDRESS              : Std_ulogic_vector(31 Downto 0) := x"90000000"; --peripheral base (informational)
 		TENSOR_A_BASE             : Std_ulogic_vector(31 Downto 0) := x"90000600"; --A window base
@@ -53,7 +53,7 @@ Entity wb_peripheral_top Is
 	);
 End Entity;
 
-Architecture rtl Of wb_peripheral_top Is
+Architecture rtl Of wb_npu Is
 
 	Constant OP_COPY_R_TO_A : Std_ulogic_vector(4 Downto 0) := "11110";
 	Constant OP_NOP : Std_ulogic_vector(4 Downto 0) := "11111";
