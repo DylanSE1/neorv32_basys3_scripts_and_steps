@@ -54,8 +54,8 @@ The NPU handles all operations through a single Finite State Machine controlled 
 
 | Operation | What It Does | Data Format |
 |-----------|-------------|-------------|
-| **Dense (INT8 GEMM)** | Fully connected layer — MAC with INT32 accumulator, requantize to INT8 | INT8 (Q0.7)|
-| **Conv2D** | 2D convolution with 3×3 kernel + bias. Supports multiple input and output channels| INT8 (Q0.7)|
+| **Dense (INT8 GEMM)** | Fully connected layer (Uses Requantization) | INT8 (Q0.7)|
+| **Conv2D** | 2D convolution with 3×3 kernel + bias. Supports multiple input and output channels (Uses Requantization) | INT8 (Q0.7)|
 | **ReLU** | max(0, x) on 4 packed INT8 values per word | INT8 (Q0.7) |
 | **Sigmoid** | Linear-approximated sigmoid on 4 packed values | INT8 (Q0.7) |
 | **SoftMax** | Two-phase: exponents + running sum, then divide | INT8 (Q0.7) |
@@ -191,4 +191,5 @@ Contributions are welcome — especially ports to new FPGA boards and new NPU op
 - **[AdaCore](https://www.adacore.com/)** — industry sponsor; project mentor Oliver Henley
 - **[NEORV32](https://github.com/stnolting/neorv32)** by Stephan Nolting — the RISC-V soft-core processor
 - **[GNAT Academic Program](https://github.com/GNAT-Academic-Program/neorv32-setups)** — NEORV32 + Ada integration
-- **Penn State University** — capstone course, instructor/advisor Naseem Ibrahim
+- **[GEMMLowp Quantization/Requantization Guide] (https://github.com/google/gemmlowp/blob/master/doc/quantization.md)** — Quantization/Requantization Guide
+- **Penn State University** — Capstone course, instructor/advisor Naseem Ibrahim
