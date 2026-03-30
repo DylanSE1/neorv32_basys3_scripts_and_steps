@@ -25,7 +25,10 @@ Developed as a capstone project at Penn State, sponsored by [AdaCore](https://ww
 
 ## Architecture
 
-The system is organized into three layers. The application never touches hardware directly — the firmware layer translates high-level calls into register operations, and the NPU executes them in hardware.
+The NPU Wishbone peripheral is connected to the NEORV32 using the NEORV32's XBUS, which supports the Wishbone communication standard.
+All programs run on the NEORV32. The NEORV32 sends data outside of its mapped address range onto the XBUS, allowing it to read/write data and control commands to the NPU. 
+
+![NEORV32 - NPU Architecture](https://github.com/dipenarathod/Wishbone-NPU/blob/main/Images/NEORV32%20NPU%20System%20Design.png)
 
 ```mermaid
 block-beta
