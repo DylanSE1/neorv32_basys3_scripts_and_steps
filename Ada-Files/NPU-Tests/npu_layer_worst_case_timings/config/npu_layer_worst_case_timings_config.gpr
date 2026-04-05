@@ -7,11 +7,11 @@ abstract project Npu_Layer_Worst_Case_Timings_Config is
    Crate_Version := "0.1.0-dev";
    Crate_Name := "npu_layer_worst_case_timings";
 
-   Alire_Host_OS := "windows";
+   Alire_Host_OS := "linux";
 
    Alire_Host_Arch := "x86_64";
 
-   Alire_Host_Distro := "msys2";
+   Alire_Host_Distro := "ubuntu";
    Ada_Compiler_Switches := External_As_List ("ADAFLAGS", " ");
    Ada_Compiler_Switches := Ada_Compiler_Switches &
           (
