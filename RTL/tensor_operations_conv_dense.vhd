@@ -2,7 +2,7 @@ Library ieee;
 Use ieee.std_logic_1164.All;
 Use ieee.numeric_std.All;
 
-Package tensor_operations_dense Is
+Package tensor_operations_conv_dense Is
 
 	Constant OP_DENSE : Std_ulogic_vector(4 Downto 0) := "00111"; --Dense layer opcode (5-bit)
 	Constant OP_CONV : Std_ulogic_vector(4 Downto 0) := "01000"; --Conv layer opcode (5-bit)
@@ -45,9 +45,9 @@ Package tensor_operations_dense Is
 		byte_index : Natural Range 0 To 3
 	) Return signed;
 
-End Package tensor_operations_dense;
+End Package tensor_operations_conv_dense;
 
-Package Body tensor_operations_dense Is
+Package Body tensor_operations_conv_dense Is
 
 	--4-lane MAC
 	--Processes up to 4 consecutive input, weight pairs
@@ -220,4 +220,4 @@ Package Body tensor_operations_dense Is
 		Return signed(byte_val);
 	End Function;
 
-End Package Body tensor_operations_dense;
+End Package Body tensor_operations_conv_dense;
